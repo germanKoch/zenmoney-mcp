@@ -1,11 +1,8 @@
-from __future__ import annotations
-
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import date
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from zen_client import ZenMoneyClient, ZenMoneyError, get_token
 
@@ -33,7 +30,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
 mcp = FastMCP("ZenMoney", lifespan=lifespan)
 
 
-def _get_client(ctx) -> ZenMoneyClient:
+def _get_client(ctx: Context) -> ZenMoneyClient:
     return ctx.request_context.lifespan_context["client"]
 
 
@@ -47,7 +44,7 @@ def _currency_symbol(client: ZenMoneyClient, instrument_id: int | None) -> str:
 
 
 @mcp.tool()
-async def get_accounts(ctx) -> str:
+async def get_accounts(ctx: Context) -> str:
     """Get all active accounts with balances."""
     client = _get_client(ctx)
     await client.sync()
@@ -62,7 +59,7 @@ async def get_accounts(ctx) -> str:
 
 @mcp.tool()
 async def get_transactions(
-    ctx,
+    ctx: Context,
     date_from: str | None = None,
     date_to: str | None = None,
     account_id: str | None = None,
@@ -120,7 +117,7 @@ async def get_transactions(
 
 
 @mcp.tool()
-async def get_categories(ctx) -> str:
+async def get_categories(ctx: Context) -> str:
     """Get the category tree (tags)."""
     client = _get_client(ctx)
     await client.sync()
@@ -130,7 +127,7 @@ async def get_categories(ctx) -> str:
     for tag in client.tags.values():
         children.setdefault(tag.parent, []).append(tag)
 
-    lines = []
+    lines: list[str] = []
 
     def _walk(parent_id: str | None, indent: int) -> None:
         for tag in sorted(children.get(parent_id, []), key=lambda t: t.title):
@@ -149,7 +146,7 @@ async def get_categories(ctx) -> str:
 
 @mcp.tool()
 async def create_transaction(
-    ctx,
+    ctx: Context,
     type: str,
     amount: float,
     account_id: str,
@@ -225,7 +222,7 @@ async def create_transaction(
 
 @mcp.tool()
 async def update_transaction(
-    ctx,
+    ctx: Context,
     transaction_id: str,
     amount: float | None = None,
     date: str | None = None,
@@ -274,7 +271,7 @@ async def update_transaction(
 
 
 @mcp.tool()
-async def delete_transaction(ctx, transaction_id: str) -> str:
+async def delete_transaction(ctx: Context, transaction_id: str) -> str:
     """Delete a transaction.
 
     Args:
@@ -290,7 +287,7 @@ async def delete_transaction(ctx, transaction_id: str) -> str:
 
 @mcp.tool()
 async def get_budgets(
-    ctx,
+    ctx: Context,
     date_from: str | None = None,
     date_to: str | None = None,
 ) -> str:
@@ -323,7 +320,7 @@ async def get_budgets(
 
 
 @mcp.tool()
-async def suggest_category(ctx, payee: str) -> str:
+async def suggest_category(ctx: Context, payee: str) -> str:
     """Suggest a category for a payee.
 
     Args:
@@ -345,8 +342,8 @@ async def suggest_category(ctx, payee: str) -> str:
 
 
 def _today() -> str:
-    from datetime import date as _date
-    return _date.today().isoformat()
+    from datetime import date
+    return date.today().isoformat()
 
 
 if __name__ == "__main__":

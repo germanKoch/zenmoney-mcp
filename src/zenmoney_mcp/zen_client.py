@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import asyncio
 import logging
@@ -12,7 +13,7 @@ from urllib.parse import urlparse, parse_qs
 
 import httpx
 
-from models import (
+from .models import (
     Account,
     Budget,
     DiffResponse,
@@ -29,7 +30,10 @@ CLIENT_ID = "g61164be3dd7521a6511ce97adc6bb"
 CLIENT_SECRET = "b2828c65b7"
 REDIRECT_PORT = 3000
 REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}"
-TOKEN_FILE = Path(__file__).parent / ".token.json"
+TOKEN_FILE = Path(
+    os.environ.get("ZENMONEY_TOKEN_FILE")
+    or Path.home() / ".config" / "zenmoney-mcp" / "token.json"
+)
 MIN_SYNC_INTERVAL = 60
 
 
@@ -41,6 +45,7 @@ class ZenMoneyError(Exception):
 
 
 def _save_token_data(data: dict) -> None:
+    TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
     TOKEN_FILE.write_text(json.dumps(data))
 
 
@@ -145,43 +150,79 @@ async def obtain_token() -> str:
     return token_data["access_token"]
 
 
+def _env_token_data() -> dict | None:
+    """Build token data from environment variables, if any are set.
+
+    Supported variables: ZENMONEY_ACCESS_TOKEN (alias: ZENMONEY_TOKEN),
+    ZENMONEY_TOKEN_TYPE, ZENMONEY_EXPIRES_IN, ZENMONEY_REFRESH_TOKEN.
+    """
+    access = os.environ.get("ZENMONEY_ACCESS_TOKEN") or os.environ.get("ZENMONEY_TOKEN")
+    refresh = os.environ.get("ZENMONEY_REFRESH_TOKEN")
+    if not access and not refresh:
+        return None
+    data: dict = {}
+    if access:
+        data["access_token"] = access
+    if refresh:
+        data["refresh_token"] = refresh
+    if token_type := os.environ.get("ZENMONEY_TOKEN_TYPE"):
+        data["token_type"] = token_type
+    if expires_in := os.environ.get("ZENMONEY_EXPIRES_IN"):
+        try:
+            data["expires_in"] = int(expires_in)
+        except ValueError:
+            logger.warning("ZENMONEY_EXPIRES_IN is not an integer, ignoring")
+    return data
+
+
+async def _is_token_valid(access_token: str) -> bool:
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{BASE_URL}/v8/diff/",
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={
+                "currentClientTimestamp": int(time.time()),
+                "serverTimestamp": int(time.time()),
+            },
+        )
+        return resp.status_code == 200
+
+
+async def _token_from_data(data: dict) -> str | None:
+    """Return a valid access token from token data, refreshing if needed."""
+    access_token = data.get("access_token")
+    if access_token and await _is_token_valid(access_token):
+        return access_token
+
+    # Access token missing or expired — try refresh
+    refresh = data.get("refresh_token")
+    if refresh:
+        try:
+            new_data = await _refresh_token(refresh)
+            _save_token_data(new_data)
+            return new_data["access_token"]
+        except ZenMoneyError:
+            logger.warning("Token refresh failed")
+    return None
+
+
 async def get_token() -> str:
     """Get a valid access token: from env, file (refresh if needed), or OAuth flow."""
-    import os
-
-    # 1. Env variable — always wins
-    env_token = os.environ.get("ZENMONEY_TOKEN")
-    if env_token:
-        return env_token
+    # 1. Env-provided token data — always tried first
+    env_data = _env_token_data()
+    if env_data:
+        token = await _token_from_data(env_data)
+        if token:
+            return token
+        logger.warning("Env-provided token is invalid or expired, trying saved token file")
 
     # 2. Saved token file
     data = _load_token_data()
     if data:
-        access_token = data.get("access_token")
-        refresh = data.get("refresh_token")
-
-        # Try the saved access token first
-        if access_token:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    f"{BASE_URL}/v8/diff/",
-                    headers={"Authorization": f"Bearer {access_token}"},
-                    json={
-                        "currentClientTimestamp": int(time.time()),
-                        "serverTimestamp": int(time.time()),
-                    },
-                )
-                if resp.status_code == 200:
-                    return access_token
-
-        # Access token expired — try refresh
-        if refresh:
-            try:
-                new_data = await _refresh_token(refresh)
-                _save_token_data(new_data)
-                return new_data["access_token"]
-            except ZenMoneyError:
-                logger.warning("Refresh token failed, falling back to OAuth flow")
+        token = await _token_from_data(data)
+        if token:
+            return token
+        logger.warning("Saved token is invalid, falling back to OAuth flow")
 
     # 3. Full OAuth flow
     return await obtain_token()

@@ -1,103 +1,125 @@
 # ZenMoney MCP Server
 
-MCP-сервер для интеграции Claude с [ZenMoney](https://zenmoney.ru) — приложением финансового трекинга.
+An MCP (Model Context Protocol) server for integrating Claude with [ZenMoney](https://zenmoney.app) — a personal finance tracking app.
 
-## Возможности
+## Features
 
-- Просмотр счетов и балансов
-- Поиск и фильтрация транзакций
-- Создание, редактирование и удаление транзакций
-- Просмотр категорий и бюджетов
-- Подсказка категории по названию контрагента
+- View accounts and balances
+- Search and filter transactions
+- Create, update, and delete transactions
+- Browse the category tree and budgets
+- Category suggestions by payee name
 
-## Установка
+## Quick Start (uvx)
 
-### 1. Клонируйте репозиторий
+The easiest way to run the server is with [uvx](https://docs.astral.sh/uv/guides/tools/) — no cloning or manual installation needed. Requires [uv](https://docs.astral.sh/uv/getting-started/installation/) to be installed.
 
-```bash
-git clone <repo-url> zenmoney-mcp
-cd zenmoney-mcp
-```
-
-### 2. Установите зависимости
-
-Требуется [uv](https://docs.astral.sh/uv/) и Python 3.12+.
-
-```bash
-uv sync
-```
-
-### 3. Добавьте сервер в Claude Desktop
-
-Откройте настройки Claude Desktop → Settings → Developer → Edit Config и добавьте:
+Add the server to Claude Desktop (Settings → Developer → Edit Config):
 
 ```json
 {
   "mcpServers": {
     "zenmoney": {
-      "command": "uv",
-      "args": ["run", "--directory", "/полный/путь/к/zenmoney-mcp", "python", "main.py"]
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/germanKoch/zenmoney-mcp", "zenmoney-mcp"]
     }
   }
 }
 ```
 
-Замените `/полный/путь/к/zenmoney-mcp` на реальный путь к папке проекта.
+Or add it to Claude Code:
 
-### 4. Перезапустите Claude Desktop
+```bash
+claude mcp add zenmoney -- uvx --from git+https://github.com/germanKoch/zenmoney-mcp zenmoney-mcp
+```
 
-После перезапуска при первом обращении к ZenMoney-инструменту откроется **окно браузера** с формой входа ZenMoney. Войдите в свой аккаунт — токен сохранится автоматически в файл `.token.json` и будет обновляться по мере необходимости.
+That's it. On first use, a browser window opens with the ZenMoney login page — sign in, and the token is saved to `~/.config/zenmoney-mcp/token.json` and refreshed automatically afterwards.
 
-## Авторизация
+## Authorization
 
-Сервер поддерживает три способа авторизации (в порядке приоритета):
+The server resolves credentials in the following priority order:
 
-### Автоматический (рекомендуется)
+### 1. Environment variables
 
-Просто запустите сервер. При первом запуске:
+Pass token data directly via the environment — useful for headless setups or when you already have a token (e.g. from [zerro.app/token](https://zerro.app/token)):
 
-1. Поднимается локальный HTTP-сервер на порту `19876`
-2. Открывается браузер со страницей входа ZenMoney
-3. После входа ZenMoney перенаправляет на `localhost:19876` с кодом авторизации
-4. Код обменивается на токен, который сохраняется в `.token.json`
-5. При истечении токена (24 часа) он автоматически обновляется через refresh token
-
-### Через переменную окружения
-
-Если вы получили токен вручную (например, на [zerro.app/token](https://zerro.app/token)):
+| Variable | Description |
+|---|---|
+| `ZENMONEY_ACCESS_TOKEN` | OAuth access token (alias: `ZENMONEY_TOKEN`) |
+| `ZENMONEY_REFRESH_TOKEN` | OAuth refresh token — lets the server refresh the access token when it expires |
+| `ZENMONEY_TOKEN_TYPE` | Token type (usually `bearer`) |
+| `ZENMONEY_EXPIRES_IN` | Token lifetime in seconds |
 
 ```json
 {
   "mcpServers": {
     "zenmoney": {
-      "command": "uv",
-      "args": ["run", "--directory", "/полный/путь/к/zenmoney-mcp", "python", "main.py"],
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/germanKoch/zenmoney-mcp", "zenmoney-mcp"],
       "env": {
-        "ZENMONEY_TOKEN": "ваш_токен"
+        "ZENMONEY_ACCESS_TOKEN": "your_access_token",
+        "ZENMONEY_REFRESH_TOKEN": "your_refresh_token",
+        "ZENMONEY_TOKEN_TYPE": "bearer",
+        "ZENMONEY_EXPIRES_IN": "86400"
       }
     }
   }
 }
 ```
 
-Этот способ менее удобен — токен живёт 24 часа и не обновляется автоматически.
+If only `ZENMONEY_ACCESS_TOKEN` is set (no refresh token), the token is used as-is and won't be refreshed — access tokens expire after 24 hours.
 
-## Доступные инструменты
+### 2. Saved token file
 
-| Инструмент | Описание |
+Tokens obtained via OAuth (or refreshed) are stored in `~/.config/zenmoney-mcp/token.json`. Override the location with the `ZENMONEY_TOKEN_FILE` environment variable.
+
+### 3. Browser OAuth flow (automatic)
+
+If no valid token is found, the server:
+
+1. Starts a local HTTP server on port `3000`
+2. Opens a browser with the ZenMoney login page
+3. Exchanges the authorization code for a token after you sign in
+4. Saves the token and refreshes it automatically when it expires
+
+## Running from source
+
+```bash
+git clone https://github.com/germanKoch/zenmoney-mcp.git
+cd zenmoney-mcp
+uv sync
+uv run zenmoney-mcp
+```
+
+Claude Desktop config for a local checkout:
+
+```json
+{
+  "mcpServers": {
+    "zenmoney": {
+      "command": "uv",
+      "args": ["run", "--directory", "/absolute/path/to/zenmoney-mcp", "zenmoney-mcp"]
+    }
+  }
+}
+```
+
+## Available tools
+
+| Tool | Description |
 |---|---|
-| `get_accounts` | Список счетов с балансами |
-| `get_transactions` | Транзакции с фильтрацией по дате, счёту, категории |
-| `create_transaction` | Создать расход, доход или перевод |
-| `update_transaction` | Изменить существующую транзакцию |
-| `delete_transaction` | Удалить транзакцию |
-| `get_categories` | Дерево категорий |
-| `get_budgets` | Бюджеты по категориям за период |
-| `suggest_category` | Подсказка категории по имени контрагента |
+| `get_accounts` | List accounts with balances |
+| `get_transactions` | Transactions filtered by date, account, or category |
+| `create_transaction` | Create an expense, income, or transfer |
+| `update_transaction` | Update an existing transaction |
+| `delete_transaction` | Delete a transaction |
+| `get_categories` | Category tree |
+| `get_budgets` | Budgets per category for a period |
+| `suggest_category` | Category suggestion by payee name |
 
-## Примеры запросов к Claude
+## Example prompts
 
-- «Покажи мои счета и балансы»
-- «Какие траты были за последнюю неделю?»
-- «Запиши расход 500 рублей на продукты с карты Тинькофф»
-- «Сколько я потратил на кафе в январе?»
+- "Show my accounts and balances"
+- "What did I spend last week?"
+- "Record a 500 RUB grocery expense from my Tinkoff card"
+- "How much did I spend on cafes in January?"

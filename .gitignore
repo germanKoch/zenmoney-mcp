@@ -1,3 +1,7 @@
 /.venv/
 /zenmoney-mcp.iml
 .token.json
+__pycache__/
+*.pyc
+/dist/
+/.idea/

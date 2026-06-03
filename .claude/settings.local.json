@@ -1,7 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git config:*)"
+      "Bash(git config:*)",
+      "WebFetch(domain:mcpmarket.com)",
+      "Bash(pip show:*)",
+      "Bash(uvx --help)",
+      "Bash(pip index:*)",
+      "Bash(pip search:*)",
+      "Bash(uvx --from zenmoney-mcp zenmoney-mcp)",
+      "Bash(npm search:*)"
     ]
   }
 }

@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from mcp.server.fastmcp import Context, FastMCP
 
-from zen_client import ZenMoneyClient, ZenMoneyError, get_token
+from .zen_client import ZenMoneyClient, ZenMoneyError, get_token
 
 logger = logging.getLogger(__name__)
 
@@ -346,5 +346,10 @@ def _today() -> str:
     return date.today().isoformat()
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Entry point for the `zenmoney-mcp` console script."""
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

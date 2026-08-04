@@ -21,6 +21,7 @@ from .models import (
     Merchant,
     Tag,
     Transaction,
+    User,
 )
 
 logger = logging.getLogger(__name__)
@@ -242,7 +243,11 @@ class ZenMoneyClient:
         self._server_ts = 0
         self._last_sync: float = 0
 
+        # Owner user id — required by the API on every pushed object
+        self.user_id: int | None = None
+
         # In-memory cache keyed by ID
+        self.users: dict[int, User] = {}
         self.instruments: dict[int, Instrument] = {}
         self.accounts: dict[str, Account] = {}
         self.tags: dict[str, Tag] = {}
@@ -274,10 +279,25 @@ class ZenMoneyClient:
         self._server_ts = diff.serverTimestamp
         self._last_sync = now
 
+        for u in diff.user:
+            self.users[u.id] = u
+        # The account owner is the user without a parent; fall back to the first one.
+        if self.users:
+            owners = [u.id for u in self.users.values() if u.parent is None]
+            self.user_id = owners[0] if owners else next(iter(self.users))
+
         for i in diff.instrument:
             self.instruments[i.id] = i
         for a in diff.account:
             self.accounts[a.id] = a
+
+        # Incremental diffs may omit the user list — accounts carry the owner id too.
+        if self.user_id is None:
+            for a in self.accounts.values():
+                owner = getattr(a, "user", None)
+                if isinstance(owner, int):
+                    self.user_id = owner
+                    break
         for t in diff.tag:
             self.tags[t.id] = t
         for m in diff.merchant:
@@ -308,10 +328,57 @@ class ZenMoneyClient:
         body.update(kwargs)
         resp = await self._client.post("/v8/diff/", json=body)
         if resp.status_code != 200:
-            raise ZenMoneyError(f"Push failed ({resp.status_code}): {resp.text}")
+            raise ZenMoneyError(
+                f"Push failed ({resp.status_code}): {resp.text}\nsent: {json.dumps(body, ensure_ascii=False)}"
+            )
         diff = DiffResponse.model_validate(resp.json())
         self._server_ts = diff.serverTimestamp
         return diff
+
+    async def _require_user_id(self) -> int:
+        if self.user_id is None:
+            await self.sync(force=True)
+        if self.user_id is None:
+            raise ZenMoneyError("Could not determine the ZenMoney user id — sync returned no user")
+        return self.user_id
+
+    def _transaction_template(self) -> dict:
+        """A full Transaction skeleton: the API rejects partial objects, every
+        property must be present — explicit nulls included.
+
+        Only documented fields are sent: undocumented ones the server adds to
+        its own responses (viewed, qrCode, incomeBankID, ...) make it answer 500
+        when pushed back as null.
+        """
+        template: dict = {
+            "deleted": False,
+            "hold": None,
+            "incomeInstrument": None,
+            "incomeAccount": None,
+            "income": 0,
+            "outcomeInstrument": None,
+            "outcomeAccount": None,
+            "outcome": 0,
+            "date": None,
+            "tag": None,
+            "merchant": None,
+            "payee": None,
+            "originalPayee": None,
+            "comment": None,
+            "mcc": None,
+            "reminderMarker": None,
+            "opIncome": None,
+            "opIncomeInstrument": None,
+            "opOutcome": None,
+            "opOutcomeInstrument": None,
+            "latitude": None,
+            "longitude": None,
+            # Undocumented, but the server rejects a push without them.
+            "incomeBankID": None,
+            "outcomeBankID": None,
+            "qrCode": None,
+        }
+        return template
 
     async def create_transaction(self, data: dict) -> Transaction:
         import uuid
@@ -319,7 +386,9 @@ class ZenMoneyClient:
         tr_id = str(uuid.uuid4())
         now = int(time.time())
         record = {
+            **self._transaction_template(),
             "id": tr_id,
+            "user": await self._require_user_id(),
             "changed": now,
             "created": now,
             **data,
@@ -337,6 +406,8 @@ class ZenMoneyClient:
             raise ZenMoneyError(f"Transaction {tr_id} not found in cache")
         record = existing.model_dump()
         record.update(updates)
+        if record.get("user") is None:
+            record["user"] = await self._require_user_id()
         record["changed"] = int(time.time())
         diff = await self._push_diff(transaction=[record])
         for tr in diff.transaction:
@@ -351,6 +422,8 @@ class ZenMoneyClient:
             raise ZenMoneyError(f"Transaction {tr_id} not found in cache")
         record = existing.model_dump()
         record["deleted"] = True
+        if record.get("user") is None:
+            record["user"] = await self._require_user_id()
         record["changed"] = int(time.time())
         await self._push_diff(transaction=[record])
         self.transactions.pop(tr_id, None)

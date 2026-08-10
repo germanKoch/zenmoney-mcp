@@ -3,6 +3,11 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+class User(BaseModel, extra="allow"):
+    id: int
+    parent: int | None = None
+
+
 class Instrument(BaseModel, extra="allow"):
     id: int
     title: str
@@ -43,6 +48,7 @@ class Merchant(BaseModel, extra="allow"):
 
 class Transaction(BaseModel, extra="allow"):
     id: str
+    user: int | None = None
     date: str
     income: float = 0
     outcome: float = 0
@@ -77,6 +83,7 @@ class Deletion(BaseModel, extra="allow"):
 
 class DiffResponse(BaseModel, extra="allow"):
     serverTimestamp: int
+    user: list[User] = Field(default_factory=list)
     instrument: list[Instrument] = Field(default_factory=list)
     account: list[Account] = Field(default_factory=list)
     tag: list[Tag] = Field(default_factory=list)

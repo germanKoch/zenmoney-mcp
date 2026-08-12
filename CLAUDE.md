@@ -30,7 +30,7 @@ uv add <package>
 
 ## Architecture
 
-- `src/zenmoney_mcp/server.py` — FastMCP server with tools (accounts, transactions, categories, budgets, suggest); `main()` is the console script entry point
+- `src/zenmoney_mcp/server.py` — MCP SDK v2 `MCPServer` with tools (accounts, transactions, categories, budgets, suggest); `main()` is the console script entry point
 - `src/zenmoney_mcp/zen_client.py` — ZenMoney API client (diff-based sync protocol) and OAuth token handling
 - `src/zenmoney_mcp/models.py` — Pydantic models for ZenMoney entities
 
